@@ -1,10 +1,16 @@
 #!/usr/bin/env python
 import logging
+import os
+from typing import Dict, Tuple
 
-# TODO: Chainlit doesn't yet work with LlamaIndex 0.10.x. https://github.com/Chainlit/chainlit/issues/752
 import chainlit as cl
+from llama_index.agent.openai import OpenAIAgent
+from llama_index.core import Settings
+from llama_index.core.agent import AgentRunner
 from llama_index.core.callbacks import CallbackManager, LlamaDebugHandler
+from llama_index.embeddings.ollama import OllamaEmbedding
 from rich.logging import RichHandler
+from rich.traceback import install
 
 # https://rich.readthedocs.io/en/latest/logging.html#handle-exceptions
 logging.basicConfig(
@@ -16,104 +22,187 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # https://rich.readthedocs.io/en/stable/traceback.html#traceback-handler
-from rich.traceback import install
-
 install(show_locals=True)
 
-# "Phoenix can display in real time the traces automatically collected from your LlamaIndex application."
-# https://docs.llamaindex.ai/en/stable/module_guides/observability/observability.html
-# Or https://docs.arize.com/phoenix/integrations/llamaindex
-import phoenix as px
 
-px.launch_app()
-
-from llama_index.core import set_global_handler
-
-set_global_handler("arize_phoenix")
-
-
-def create_callback_manager(should_use_chainlit: bool = True):
-    callback_handlers = [LlamaDebugHandler()]
-    if should_use_chainlit:
-        callback_handlers.append(cl.LlamaIndexCallbackHandler())
+def create_callback_manager() -> CallbackManager:
+    debug_logger = logging.getLogger("debug")
+    debug_logger.setLevel(logging.DEBUG)
+    callback_handlers = [
+        LlamaDebugHandler(logger=debug_logger),
+        cl.LlamaIndexCallbackHandler(),
+    ]
     return CallbackManager(callback_handlers)
 
 
-from llama_index.core.agent import ReActAgent
+def set_up_llama_index(
+    should_use_chainlit: bool = False,
+):
+    """
+    One-time setup code for shared objects across all AgentRunners.
+    """
+    # Needed for "Retrieved the following sources" to show up on Chainlit.
+    Settings.callback_manager = create_callback_manager()
+    # ============= Beginning of the code block for wiring on to models. =============
+    # At least when Chainlit is involved, LLM initializations must happen upon the `@cl.on_chat_start` event,
+    # not in the global scope.
+    # Otherwise, it messes up with Arize Phoenix: LLM calls won't be captured as parts of an Agent Step.
+    if api_key := os.environ.get("OPENAI_API_KEY", None):
+        logger.info("Using OpenAI API.")
+        from llama_index.llms.openai import OpenAI
 
+        Settings.llm = OpenAI(
+            model="gpt-4o-mini",
+            api_key=api_key,
+            is_function_calling_model=True,
+            is_chat_model=True,
+        )
+    elif api_key := os.environ.get("TOGETHER_AI_API_KEY", None):
+        logger.info("Using Together AI API.")
+        from llama_index.llms.openai_like import OpenAILike
 
-def create_agent(
-    should_use_chainlit: bool,
-    is_general_purpose: bool = True,
-) -> ReActAgent:
-    callback_manager = create_callback_manager(should_use_chainlit)
-    from llama_index.core import Settings
-    from llama_index.llms.ollama import Ollama
+        Settings.llm = OpenAILike(
+            model="meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+            api_base="https://api.together.xyz/v1",
+            api_key=api_key,
+            is_function_calling_model=True,
+            is_chat_model=True,
+        )
+    else:
+        logger.info("Using Ollama's OpenAI-compatible API.")
+        from llama_index.llms.openai_like import OpenAILike
 
-    # https://docs.llamaindex.ai/en/stable/examples/llm/localai.html
-    # But, instead of LocalAI, I'm using "LM Studio".
-    Settings.llm = Ollama(
-        model="zephyr:7b-beta",
-        timeout=600,  # secs
-        streaming=True,
-        callback_manager=callback_manager,
-        additional_kwargs={"stop": ["Observation:"]},
+        Settings.llm = OpenAILike(
+            model="llama3.1",
+            api_base="http://localhost:11434/v1",
+            # api_base="http://10.147.20.237:11434/v1",
+            api_key="ollama",
+            is_function_calling_model=True,
+            is_chat_model=True,
+        )
+
+    Settings.embed_model = OllamaEmbedding(
+        # https://ollama.com/library/nomic-embed-text
+        model_name="nomic-embed-text",
+        # Uncomment the following line to use the LLM server running on my gaming PC.
+        # base_url="http://10.147.20.237:11434",
     )
-    # `ServiceContext.from_defaults` doesn't take callback manager from the LLM by default.
-    # TODO: Check if this is still the case with `Settings` in 0.10.x.
-    Settings.callback_manager = callback_manager
-    # https://docs.llamaindex.ai/en/stable/module_guides/models/embeddings.html#local-embedding-models
-    # HuggingFaceEmbedding requires transformers and PyTorch to be installed.
-    # Run `pip install transformers torch`.
-    Settings.embed_model = "local"
 
-    from tool_for_backburner import make_tools as make_tools_for_backburner
-    from tool_for_my_notes import make_tool as make_tool_for_my_notes
-    from tool_for_wikipedia import make_tool as make_tool_for_wikipedia
 
-    all_tools = make_tools_for_backburner()
-    if is_general_purpose:
-        all_tools += [
-            make_tool_for_my_notes(),
-            make_tool_for_wikipedia(),
-        ]
-    # TODO: When we have too many tools for the Agent to comprehend in one go (In other words, the sheer amounts of two
-    #  descriptions has taken most of the context window.), try `custom_obj_retriever` in
-    #  https://docs.llamaindex.ai/en/latest/examples/agent/multi_document_agents-v1.html.
-    #  This will allow us to retrieve the tools, instead of having to hardcode them in the code.
+set_up_llama_index()
 
-    from my_react_chat_formatter import MyReActChatFormatter
 
-    chat_formatter = MyReActChatFormatter()
-    return ReActAgent.from_tools(
-        tools=all_tools,
-        verbose=True,
-        react_chat_formatter=chat_formatter,
-        callback_manager=callback_manager,
+def init() -> Tuple[Dict[str, AgentRunner], Dict[str, str], AgentRunner]:
+    participants: Dict[str, AgentRunner] = {
+        "Alice": OpenAIAgent.from_tools(
+            tools=[],
+            system_prompt="Your name is Alice. You are casually chatting with a group of friends. You are kind and helpful.",
+        ),
+        "Bob": OpenAIAgent.from_tools(
+            tools=[],
+            system_prompt="Your name is Bob. You are casually chatting with a group of friends. You are aggressive but caring.",
+        ),
+    }
+    opinions: Dict[str, str] = {}
+
+    judge: AgentRunner = OpenAIAgent.from_tools(
+        tools=[],
+        system_prompt='You are the judge. You are impartial and fair. You are here to help your friends resolve their disputes. Given a list of opinions, determine whether they have reached an agreement or not. If they did, say "yes". If things has really escalated, say "stop". Otherwise, say "keep going".',
     )
+    return participants, opinions, judge
 
 
 @cl.on_chat_start
-async def factory():
+async def on_chat_start():
+    participants, opinions, judge = init()
     cl.user_session.set(
-        "agent",
-        create_agent(should_use_chainlit=True),
+        "participants",
+        participants,
+    )
+    cl.user_session.set(
+        "opinions",
+        opinions,
+    )
+    cl.user_session.set(
+        "judge",
+        judge,
     )
 
 
 @cl.on_message
-async def main(message: cl.Message):
+async def on_message(message: cl.Message):
     """
     ChainLit provides a web GUI for this application.
     """
-    agent: ReActAgent = cl.user_session.get("agent")
-    response = agent.stream_chat(message.content)
-    response_message = cl.Message(content="")
-    for token in response.response_gen:
-        await response_message.stream_token(token=token)
-    if response.response:
-        response_message.content = response.response
-    await response_message.send()
+    handle_inquiry(
+        user_input=message.content,
+        participants=cl.user_session.get("participants"),
+        opinions=cl.user_session.get("opinions"),
+        judge=cl.user_session.get("judge"),
+        should_use_chainlit=True,
+    )
+
+
+def handle_inquiry(
+    user_input: str,
+    participants: Dict[str, AgentRunner],
+    opinions: Dict[str, str],
+    judge: AgentRunner,
+    should_use_chainlit: bool = False,
+):
+    should_keep_going = True
+    round_id = 0
+    while should_keep_going:
+        round_id += 1
+        print(
+            f"=============================== Round {round_id} ==============================="
+        )
+        for name, participant in participants.items():
+            request_lines = [f'For a friend\'s inquiry, "{user_input}",']
+            if opinions:
+                request_lines.append("their other friends have these to say:")
+                for other_name, other_opinion in opinions.items():
+                    if other_name == name:
+                        continue
+                    request_lines.append(f'- {name}: "{participant.chat(user_input)}"')
+            if name in opinions:
+                request_lines.append(f'Your previous opinion was: "{opinions[name]}"')
+            else:
+                request_lines.append("You haven't given an opinion yet.")
+            request_lines.append(
+                "What would you say to this friend? (Keep it brief. It's a phone call."
+            )
+            request = "\n".join(request_lines)
+            response = participant.chat(request)
+            opinions[name] = response
+            if should_use_chainlit:
+                message = cl.Message(
+                    content=response,
+                    author=name,
+                )
+                cl.run_sync(message.send())
+            print(
+                f"-------------------------------- {name} says -------------------------------- \n{response}"
+            )
+        judgment = judge.chat(f"Here are the opinions from your friends: {opinions}")
+        print(
+            f"-------------------------------- The judge says -------------------------------- \n{judgment}"
+        )
+        if judgment == "yes":
+            print("The judge has decided that you have reached an agreement.")
+            should_keep_going = False
+        elif judgment == "stop":
+            print("The judge has decided that things have really escalated.")
+            should_keep_going = False
+        else:
+            print("The judge has decided that you should keep going.")
+            should_keep_going = True
+        if should_use_chainlit:
+            message = cl.Message(
+                content=judgment,
+                author="judge",
+            )
+            cl.run_sync(message.send())
 
 
 if __name__ == "__main__":
@@ -123,5 +212,14 @@ if __name__ == "__main__":
     from rich.console import Console
 
     console = Console()
-    agent = create_agent(should_use_chainlit=False)
-    agent.chat_repl()
+    participants, opinions, judge = init()
+    user_input = (
+        "Had a fight with my partner. It was pretty bad. Should I break up with him?"
+    )
+    handle_inquiry(
+        user_input=user_input,
+        participants=participants,
+        opinions=opinions,
+        judge=judge,
+        should_use_chainlit=False,
+    )
