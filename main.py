@@ -4,6 +4,7 @@ import os
 from typing import Dict, Tuple
 
 import chainlit as cl
+from dotenv import load_dotenv
 from llama_index.agent.openai import OpenAIAgent
 from llama_index.core import Settings
 from llama_index.core.agent import AgentRunner
@@ -50,6 +51,11 @@ logger = logging.getLogger()
 
 # https://rich.readthedocs.io/en/stable/traceback.html#traceback-handler
 install(show_locals=True)
+
+
+# ruff: noqa: E402
+# Keep this here to ensure imports have environment available.
+env_found = load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"))
 
 
 def create_callback_manager(should_use_chainlit: bool = False) -> CallbackManager:
