@@ -8,6 +8,8 @@ from llama_index.agent.openai import OpenAIAgent
 from llama_index.core import Settings
 from llama_index.core.agent import AgentRunner
 from llama_index.core.callbacks import CallbackManager, LlamaDebugHandler
+from llama_index.core.llms import ChatMessage, MessageRole
+from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.embeddings.ollama import OllamaEmbedding
 from openinference.instrumentation.llama_index import LlamaIndexInstrumentor
 from phoenix.otel import register
@@ -118,19 +120,20 @@ def set_up_llama_index(
 set_up_llama_index()
 
 
-def init() -> Tuple[Dict[str, AgentRunner], Dict[str, str], AgentRunner]:
+def init() -> Tuple[ChatMemoryBuffer, Dict[str, AgentRunner], AgentRunner]:
+    chat_memory = ChatMemoryBuffer.from_defaults()
     participants: Dict[str, AgentRunner] = {
         "Alice": OpenAIAgent.from_tools(
             tools=[],
             system_prompt="Your name is Alice. You are casually texting with a group of friends. You are kind and helpful.",
+            memory=chat_memory,
         ),
         "Bob": OpenAIAgent.from_tools(
             tools=[],
             system_prompt="Your name is Bob. You are casually texting with a group of friends. You are aggressive but caring.",
+            memory=chat_memory,
         ),
     }
-    opinions: Dict[str, str] = {}
-
     judge: AgentRunner = OpenAIAgent.from_tools(
         tools=[],
         system_prompt="You are the judge. You are impartial and fair. "
@@ -140,20 +143,17 @@ def init() -> Tuple[Dict[str, AgentRunner], Dict[str, str], AgentRunner]:
         'If things has really escalated, say "stop". '
         'Otherwise, say "keep going". '
         "Use literally these words. Do not even change the capitalization or add punctuation.",
+        memory=chat_memory,
     )
-    return participants, opinions, judge
+    return chat_memory, participants, judge
 
 
 @cl.on_chat_start
 async def on_chat_start():
-    participants, opinions, judge = init()
+    _, participants, judge = init()
     cl.user_session.set(
         "participants",
         participants,
-    )
-    cl.user_session.set(
-        "opinions",
-        opinions,
     )
     cl.user_session.set(
         "judge",
@@ -169,7 +169,6 @@ async def on_message(message: cl.Message):
     handle_inquiry(
         user_input=message.content,
         participants=cl.user_session.get("participants"),
-        opinions=cl.user_session.get("opinions"),
         judge=cl.user_session.get("judge"),
         should_use_chainlit=True,
     )
@@ -178,35 +177,25 @@ async def on_message(message: cl.Message):
 def handle_inquiry(
     user_input: str,
     participants: Dict[str, AgentRunner],
-    opinions: Dict[str, str],
     judge: AgentRunner,
     should_use_chainlit: bool = False,
 ):
     should_keep_going = True
     round_id = 0
+    # Memory is shared among all agents, so we can just grab the memory of any agent.
+    chat_memory: ChatMemoryBuffer = judge.memory
+    chat_memory.put(ChatMessage(content=f"{user_input}", author=MessageRole.USER))
     while should_keep_going:
         round_id += 1
         print(
             f"=============================== Round {round_id} ==============================="
         )
         for name, participant in participants.items():
-            request_lines = [f'For a friend\'s inquiry, "{user_input}",']
-            if opinions:
-                request_lines.append("their other friends have these to say:")
-                for other_name, other_opinion in opinions.items():
-                    if other_name == name:
-                        continue
-                    request_lines.append(f'- {name}: "{participant.chat(user_input)}"')
-            if name in opinions:
-                request_lines.append(f'Your previous opinion was: "{opinions[name]}"')
-            else:
-                request_lines.append("You haven't given an opinion yet.")
-            request_lines.append(
-                "What would you say to this friend? (Keep it brief. It's a phone call."
-            )
-            request = "\n".join(request_lines)
-            response = participant.chat(request).response
-            opinions[name] = response
+            last_message = pop_last_message(chat_memory)
+            response = participant.chat(
+                # The last message will always begin with "(speaker: {name})", so we can simply access the content.
+                last_message.content
+            ).response
             if should_use_chainlit:
                 message = cl.Message(
                     content=response,
@@ -216,8 +205,15 @@ def handle_inquiry(
             print(
                 f"-------------------------------- {name} says -------------------------------- \n{response}"
             )
+            # This LLM response is also appended to the chat memory. Let's temper it a bit.
+            last_message = pop_last_message(chat_memory)
+            prefix = f"(speaker: {name})"
+            if not last_message.content.startswith(prefix):
+                last_message.content = f"{prefix} {last_message.content}"
+            last_message.role = MessageRole.USER
+            chat_memory.chat_store.add_message(chat_memory.chat_store_key, last_message)
         judgment: str = judge.chat(
-            f"Here are the opinions from your friends: {opinions}"
+            "Have they reached an agreement or not? [yes/keep going/stop]"
         ).response
         print(
             f"-------------------------------- The judge says -------------------------------- \n{judgment}"
@@ -237,6 +233,19 @@ def handle_inquiry(
                 author="judge",
             )
             cl.run_sync(message.send())
+        # Judge's response should not be heard by the participants, so does the prompt to the judge.
+        pop_last_message(chat_memory)
+        pop_last_message(chat_memory)
+
+
+def pop_last_message(chat_memory):
+    """
+    Pop the last message from the chat memory.
+    """
+    all_messages = chat_memory.chat_store.get_messages(chat_memory.chat_store_key)
+    last_message = all_messages[-1]
+    chat_memory.chat_store.delete_last_message(chat_memory.chat_store_key)
+    return last_message
 
 
 if __name__ == "__main__":
@@ -246,12 +255,11 @@ if __name__ == "__main__":
     from rich.console import Console
 
     console = Console()
-    participants, opinions, judge = init()
+    _, participants, judge = init()
     user_input = "Yo srsly should I vote for Trump?"
     handle_inquiry(
         user_input=user_input,
         participants=participants,
-        opinions=opinions,
         judge=judge,
         should_use_chainlit=False,
     )
