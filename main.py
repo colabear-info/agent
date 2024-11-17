@@ -58,6 +58,8 @@ install(show_locals=True)
 # Keep this here to ensure imports have environment available.
 env_found = load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"))
 
+shared_states = {"is_conversation_going": False}
+
 
 def create_callback_manager(should_use_chainlit: bool = False) -> CallbackManager:
     debug_logger = logging.getLogger("debug")
@@ -203,6 +205,10 @@ def handle_inquiry(
             content=f"(speaker: {user_name}) {user_input}", author=MessageRole.USER
         )
     )
+    if shared_states["is_conversation_going"]:
+        print(">>>>>>>>>> The conversation is already going on <<<<<<<<<<<<")
+        return
+    shared_states["is_conversation_going"] = True
     while should_keep_going:
         round_id += 1
         print(
@@ -261,6 +267,7 @@ def handle_inquiry(
         # Judge's response should not be heard by the participants, so does the prompt to the judge.
         pop_last_message(chat_memory)
         pop_last_message(chat_memory)
+    shared_states["is_conversation_going"] = False
 
 
 def change_point_of_view(chat_memory: ChatMemoryBuffer, prefix: str):
