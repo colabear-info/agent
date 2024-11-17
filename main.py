@@ -122,11 +122,11 @@ def init() -> Tuple[Dict[str, AgentRunner], Dict[str, str], AgentRunner]:
     participants: Dict[str, AgentRunner] = {
         "Alice": OpenAIAgent.from_tools(
             tools=[],
-            system_prompt="Your name is Alice. You are casually chatting with a group of friends. You are kind and helpful.",
+            system_prompt="Your name is Alice. You are casually texting with a group of friends. You are kind and helpful.",
         ),
         "Bob": OpenAIAgent.from_tools(
             tools=[],
-            system_prompt="Your name is Bob. You are casually chatting with a group of friends. You are aggressive but caring.",
+            system_prompt="Your name is Bob. You are casually texting with a group of friends. You are aggressive but caring.",
         ),
     }
     opinions: Dict[str, str] = {}
