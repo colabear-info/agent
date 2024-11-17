@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import os
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 import chainlit as cl
 from dotenv import load_dotenv
@@ -177,15 +177,15 @@ async def on_message(message: cl.Message):
     """
     This weird combination of `asyncio.create_task(cl.make_async` makes `handle_inquiry` non-blocking. How cool is that?
     """
-    asyncio.create_task(
-        cl.make_async(handle_inquiry)(
-            user_input=message.content,
-            chat_memory=cl.user_session.get("chat_history"),
-            participants=cl.user_session.get("participants"),
-            judge=cl.user_session.get("judge"),
-            should_use_chainlit=True,
-        )
+    asynchronously_handle_inquiry: Callable = cl.make_async(handle_inquiry)
+    coroutine = asynchronously_handle_inquiry(
+        user_input=message.content,
+        chat_memory=cl.user_session.get("chat_history"),
+        participants=cl.user_session.get("participants"),
+        judge=cl.user_session.get("judge"),
+        should_use_chainlit=True,
     )
+    asyncio.create_task(coroutine)
 
 
 def handle_inquiry(
