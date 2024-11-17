@@ -179,6 +179,7 @@ def handle_inquiry(
     participants: Dict[str, AgentRunner],
     judge: AgentRunner,
     should_use_chainlit: bool = False,
+    should_judgment_be_visible: bool = False,
 ):
     should_keep_going = True
     round_id = 0
@@ -227,7 +228,7 @@ def handle_inquiry(
         else:
             print("The judge has decided that you should keep going.")
             should_keep_going = True
-        if should_use_chainlit:
+        if should_use_chainlit and should_judgment_be_visible:
             message = cl.Message(
                 content=judgment,
                 author="judge",
