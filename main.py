@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import asyncio
 import logging
 import os
 from typing import Dict, List, Tuple
@@ -174,14 +175,16 @@ async def on_chat_start():
 @cl.on_message
 async def on_message(message: cl.Message):
     """
-    ChainLit provides a web GUI for this application.
+    This weird combination of `asyncio.create_task(cl.make_async` makes `handle_inquiry` non-blocking. How cool is that?
     """
-    handle_inquiry(
-        user_input=message.content,
-        chat_memory=cl.user_session.get("chat_history"),
-        participants=cl.user_session.get("participants"),
-        judge=cl.user_session.get("judge"),
-        should_use_chainlit=True,
+    asyncio.create_task(
+        cl.make_async(handle_inquiry)(
+            user_input=message.content,
+            chat_memory=cl.user_session.get("chat_history"),
+            participants=cl.user_session.get("participants"),
+            judge=cl.user_session.get("judge"),
+            should_use_chainlit=True,
+        )
     )
 
 
