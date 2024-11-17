@@ -9,8 +9,33 @@ from llama_index.core import Settings
 from llama_index.core.agent import AgentRunner
 from llama_index.core.callbacks import CallbackManager, LlamaDebugHandler
 from llama_index.embeddings.ollama import OllamaEmbedding
+from openinference.instrumentation.llama_index import LlamaIndexInstrumentor
+from phoenix.otel import register
 from rich.logging import RichHandler
 from rich.traceback import install
+
+# https://rich.readthedocs.io/en/latest/logging.html#handle-exceptions
+logging.basicConfig(
+    # level=logging.DEBUG,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)],
+)
+logger = logging.getLogger()
+
+# https://rich.readthedocs.io/en/stable/traceback.html#traceback-handler
+install(show_locals=True)
+
+
+tracer_provider = register(
+    project_name="besties",
+    endpoint="http://localhost:6006/v1/traces",
+)
+
+
+LlamaIndexInstrumentor().instrument(tracer_provider=tracer_provider)
+
+user_name = os.getlogin()
 
 # https://rich.readthedocs.io/en/latest/logging.html#handle-exceptions
 logging.basicConfig(
