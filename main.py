@@ -25,13 +25,14 @@ logger = logging.getLogger()
 install(show_locals=True)
 
 
-def create_callback_manager() -> CallbackManager:
+def create_callback_manager(should_use_chainlit: bool = False) -> CallbackManager:
     debug_logger = logging.getLogger("debug")
     debug_logger.setLevel(logging.DEBUG)
     callback_handlers = [
         LlamaDebugHandler(logger=debug_logger),
-        cl.LlamaIndexCallbackHandler(),
     ]
+    if should_use_chainlit:
+        callback_handlers.append(cl.LlamaIndexCallbackHandler())
     return CallbackManager(callback_handlers)
 
 
@@ -42,7 +43,7 @@ def set_up_llama_index(
     One-time setup code for shared objects across all AgentRunners.
     """
     # Needed for "Retrieved the following sources" to show up on Chainlit.
-    Settings.callback_manager = create_callback_manager()
+    Settings.callback_manager = create_callback_manager(should_use_chainlit)
     # ============= Beginning of the code block for wiring on to models. =============
     # At least when Chainlit is involved, LLM initializations must happen upon the `@cl.on_chat_start` event,
     # not in the global scope.
