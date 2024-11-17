@@ -144,7 +144,7 @@ def init() -> Tuple[ChatMemoryBuffer, Dict[str, AgentRunner], AgentRunner]:
         tools=[],
         system_prompt="You are the judge. You are impartial and fair. "
         "You are here to help your friends resolve their disputes. "
-        "Given a list of opinions, determine whether they have reached an agreement or not. "
+        "Given a series of chat messages, determine whether they have reached an agreement or a truce. "
         'If they did, say "yes". '
         'If things has really escalated, say "stop". '
         'Otherwise, say "keep going". '
