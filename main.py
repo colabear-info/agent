@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import logging
 import os
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import chainlit as cl
 from dotenv import load_dotenv
@@ -156,7 +156,11 @@ def init() -> Tuple[ChatMemoryBuffer, Dict[str, AgentRunner], AgentRunner]:
 
 @cl.on_chat_start
 async def on_chat_start():
-    _, participants, judge = init()
+    chat_history, participants, judge = init()
+    cl.user_session.set(
+        "chat_history",
+        chat_history,
+    )
     cl.user_session.set(
         "participants",
         participants,
@@ -174,6 +178,7 @@ async def on_message(message: cl.Message):
     """
     handle_inquiry(
         user_input=message.content,
+        chat_memory=cl.user_session.get("chat_history"),
         participants=cl.user_session.get("participants"),
         judge=cl.user_session.get("judge"),
         should_use_chainlit=True,
@@ -182,6 +187,7 @@ async def on_message(message: cl.Message):
 
 def handle_inquiry(
     user_input: str,
+    chat_memory: ChatMemoryBuffer,
     participants: Dict[str, AgentRunner],
     judge: AgentRunner,
     should_use_chainlit: bool = False,
@@ -189,15 +195,21 @@ def handle_inquiry(
 ):
     should_keep_going = True
     round_id = 0
-    # Memory is shared among all agents, so we can just grab the memory of any agent.
-    chat_memory: ChatMemoryBuffer = judge.memory
-    chat_memory.put(ChatMessage(content=f"{user_input}", author=MessageRole.USER))
+    chat_memory.put(
+        ChatMessage(
+            content=f"(speaker: {user_name}) {user_input}", author=MessageRole.USER
+        )
+    )
     while should_keep_going:
         round_id += 1
         print(
             f"=============================== Round {round_id} ==============================="
         )
         for name, participant in participants.items():
+            prefix = f"(speaker: {name})"
+            change_point_of_view(chat_memory, prefix)
+            # The last message will never be from this participant,
+            # so we can safely pop it & use it to kick off the `chat` method.
             last_message = pop_last_message(chat_memory)
             response = participant.chat(
                 # The last message will always begin with "(speaker: {name})", so we can simply access the content.
@@ -214,10 +226,14 @@ def handle_inquiry(
             )
             # This LLM response is also appended to the chat memory. Let's temper it a bit.
             last_message = pop_last_message(chat_memory)
-            prefix = f"(speaker: {name})"
             if not last_message.content.startswith(prefix):
                 last_message.content = f"{prefix} {last_message.content}"
             chat_memory.chat_store.add_message(chat_memory.chat_store_key, last_message)
+        change_point_of_view(
+            chat_memory,
+            # No message will be from the judge, so this method call will effectively mark all messages as "user messages".
+            "(speaker: judge)",
+        )
         judgment: str = judge.chat(
             "Have they reached an agreement or not? [yes/keep going/stop]"
         ).response
@@ -244,6 +260,27 @@ def handle_inquiry(
         pop_last_message(chat_memory)
 
 
+def change_point_of_view(chat_memory: ChatMemoryBuffer, prefix: str):
+    """
+    Change the point of view of the last message in the chat memory.
+
+    Caveat: This relies on the fact that the ChatMemoryBuffer:
+    1. retains `prefix` literally for all messages, and
+    2. provides a read-write view of the chat history, because we'll be editing the messages in-place.
+    """
+    all_messages: List[ChatMessage] = chat_memory.chat_store.get_messages(
+        chat_memory.chat_store_key
+    )
+    for message in all_messages:
+        if message.role not in (MessageRole.ASSISTANT, MessageRole.USER):
+            continue
+        if message.content.startswith(prefix):
+            # "That's me!"
+            message.role = MessageRole.ASSISTANT
+        else:
+            message.role = MessageRole.USER
+
+
 def pop_last_message(chat_memory):
     """
     Pop the last message from the chat memory.
@@ -261,10 +298,11 @@ if __name__ == "__main__":
     from rich.console import Console
 
     console = Console()
-    _, participants, judge = init()
+    chat_history, participants, judge = init()
     user_input = "Yo srsly should I vote for Trump?"
     handle_inquiry(
         user_input=user_input,
+        chat_memory=chat_history,
         participants=participants,
         judge=judge,
         should_use_chainlit=False,
