@@ -108,7 +108,13 @@ def init() -> Tuple[Dict[str, AgentRunner], Dict[str, str], AgentRunner]:
 
     judge: AgentRunner = OpenAIAgent.from_tools(
         tools=[],
-        system_prompt='You are the judge. You are impartial and fair. You are here to help your friends resolve their disputes. Given a list of opinions, determine whether they have reached an agreement or not. If they did, say "yes". If things has really escalated, say "stop". Otherwise, say "keep going".',
+        system_prompt="You are the judge. You are impartial and fair. "
+        "You are here to help your friends resolve their disputes. "
+        "Given a list of opinions, determine whether they have reached an agreement or not. "
+        'If they did, say "yes". '
+        'If things has really escalated, say "stop". '
+        'Otherwise, say "keep going". '
+        "Use literally these words. Do not even change the capitalization or add punctuation.",
     )
     return participants, opinions, judge
 
@@ -174,7 +180,7 @@ def handle_inquiry(
                 "What would you say to this friend? (Keep it brief. It's a phone call."
             )
             request = "\n".join(request_lines)
-            response = participant.chat(request)
+            response = participant.chat(request).response
             opinions[name] = response
             if should_use_chainlit:
                 message = cl.Message(
@@ -185,7 +191,9 @@ def handle_inquiry(
             print(
                 f"-------------------------------- {name} says -------------------------------- \n{response}"
             )
-        judgment = judge.chat(f"Here are the opinions from your friends: {opinions}")
+        judgment: str = judge.chat(
+            f"Here are the opinions from your friends: {opinions}"
+        ).response
         print(
             f"-------------------------------- The judge says -------------------------------- \n{judgment}"
         )
