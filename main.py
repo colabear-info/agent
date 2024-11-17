@@ -247,9 +247,7 @@ if __name__ == "__main__":
 
     console = Console()
     participants, opinions, judge = init()
-    user_input = (
-        "Had a fight with my partner. It was pretty bad. Should I break up with him?"
-    )
+    user_input = "Yo srsly should I vote for Trump?"
     handle_inquiry(
         user_input=user_input,
         participants=participants,
