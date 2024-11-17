@@ -217,7 +217,6 @@ def handle_inquiry(
             prefix = f"(speaker: {name})"
             if not last_message.content.startswith(prefix):
                 last_message.content = f"{prefix} {last_message.content}"
-            last_message.role = MessageRole.USER
             chat_memory.chat_store.add_message(chat_memory.chat_store_key, last_message)
         judgment: str = judge.chat(
             "Have they reached an agreement or not? [yes/keep going/stop]"
