@@ -41,18 +41,6 @@ LlamaIndexInstrumentor().instrument(tracer_provider=tracer_provider)
 
 user_name = os.getlogin()
 
-# https://rich.readthedocs.io/en/latest/logging.html#handle-exceptions
-logging.basicConfig(
-    # level=logging.DEBUG,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)],
-)
-logger = logging.getLogger()
-
-# https://rich.readthedocs.io/en/stable/traceback.html#traceback-handler
-install(show_locals=True)
-
 
 # ruff: noqa: E402
 # Keep this here to ensure imports have environment available.
